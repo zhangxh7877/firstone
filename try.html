@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Three.js 基础着色器示例</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <!-- 
+      Import Map 是一种现代浏览器功能，
+      它允许我们使用像 'three' 这样的“裸模块说明符”，
+      而无需复杂的构建工具。
+    -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        
+        // 1. 场景基础设置
+        // =================================================================
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+        // 关键修正：将相机向后移动，以便能看到位于原点的物体
+        camera.position.z = 2;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+        
+        // 2. 创建带有着色器材质的物体
+        // =================================================================
+        const geometry = new THREE.PlaneGeometry(2, 2);
+
+        // 创建ShaderMaterial
+        const material = new THREE.ShaderMaterial({
+            // 顶点着色器：负责计算顶点的位置
+            vertexShader: `
+                // varying 是一种特殊的变量，用于将数据从顶点着色器传递给片元着色器
+                varying vec2 vUv; 
+
+                void main() {
+                    // uv 是Three.js为几何体顶点内置的UV坐标(范围0-1)
+                    // 我们将它赋值给 vUv，以便在片元着色器中使用
+                    vUv = uv; 
+
+                    // gl_Position 是一个特殊的内建变量，必须被赋值
+                    // 它代表了顶点在屏幕上的最终位置
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            // 片元着色器：负责计算每个像素的颜色
+            fragmentShader: `
+                // 接收从顶点着色器传来的UV坐标
+                varying vec2 vUv; 
+
+                void main() {
+                    // 根据UV坐标(范围0-1)来生成RGB颜色
+                    // vUv.x (从左到右 0->1) 作为红色通道
+                    // vUv.y (从下到上 0->1) 作为绿色通道
+                    // 蓝色通道设为固定值 1.0
+                    // Alpha通道(透明度)设为 1.0
+                    gl_FragColor = vec4(vUv.x, vUv.y, 1.0, 1.0);
+                }
+            `
+        });
+
+        const plane = new THREE.Mesh(geometry, material);
+        scene.add(plane);
+
+        // 3. 动画循环
+        // =================================================================
+        function animate() {
+            // 在每一帧重新渲染场景
+            renderer.render( scene, camera );
+        }
+
+        // 使用 Three.js 推荐的 setAnimationLoop 来创建循环
+        renderer.setAnimationLoop( animate );
+
+        // 4. 窗口自适应
+        // =================================================================
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        });
+    </script>
+</body>
+</html>

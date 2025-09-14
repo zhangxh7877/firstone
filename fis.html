@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js 着色器案例 - 全息地球</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000510; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/",
+                "lil-gui": "https://unpkg.com/lil-gui@0.19.1/dist/lil-gui.esm.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import GUI from 'lil-gui';
+
+        // 1. 场景基础设置
+        // =================================================================
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 0, 2.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // 2. GLSL 着色器代码
+        // =================================================================
+        
+        const vertexShader = `
+            // Varyings: 从顶点着色器传递到片元着色器的数据
+            varying vec3 vNormal;       // 传递法线
+            varying vec3 vPosition;     // 传递顶点位置
+
+            void main() {
+                // 将法线和顶点位置转换到世界坐标系下
+                vNormal = normalize(normalMatrix * normal);
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vPosition = worldPosition.xyz;
+
+                // 计算最终顶点位置
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            // Uniforms: 从JS传入的、对所有片元都相同的数据
+            uniform float uTime;
+            uniform vec3 uGlowColor; // 辉光/扫描线颜色
+            uniform float uFresnelPower; // 菲涅尔效应强度
+            uniform float uScanlineFrequency; // 扫描线频率
+            uniform float uScanlineSpeed; // 扫描线速度
+
+            // Varyings: 从顶点着色器接收的数据
+            varying vec3 vNormal;
+            varying vec3 vPosition;
+
+            void main() {
+                // 1. 计算菲涅尔效应 (Fresnel Effect)
+                // ==================================
+                // 菲涅尔效应指的是物体边缘部分比正对视线的部分更亮或更透明
+                vec3 viewDirection = normalize(cameraPosition - vPosition);
+                float fresnel = 1.0 - dot(viewDirection, vNormal); // 点积越大，说明视线和法线越接近，菲涅尔效应越弱
+                fresnel = pow(fresnel, uFresnelPower); // 用pow函数强化边缘效果
+
+                // 2. 计算扫描线 (Scanline Effect)
+                // ==================================
+                // 使用sin函数根据世界坐标的y值和时间创建水平移动的条纹
+                float scanline = sin((vPosition.y * uScanlineFrequency) + (uTime * uScanlineSpeed)) * 0.5 + 0.5;
+                // 用smoothstep创建更平滑的线条边缘
+                scanline = smoothstep(0.9, 1.0, scanline);
+
+                // 3. 计算闪烁的点阵 (Flickering Dots)
+                // ==================================
+                // 使用sin和时间创建随机的闪烁感
+                float flicker = sin(uTime * 10.0 + vPosition.y * 5.0) * 0.5 + 0.5;
+                // step函数创造出硬边缘的点
+                float dots = step(0.99, sin(vPosition.x * 20.0 * flicker) * sin(vPosition.y * 20.0 * flicker));
+
+                // 4. 组合效果
+                // ==================================
+                // 将扫描线和点阵效果叠加到辉光颜色上
+                vec3 finalColor = uGlowColor * scanline + uGlowColor * dots;
+                
+                // 最终的alpha(透明度)由菲涅尔效应决定
+                float finalAlpha = fresnel;
+                
+                // 将扫描线区域的透明度也提高，让非扫描线区域更透明
+                finalAlpha += scanline;
+
+                gl_FragColor = vec4(finalColor, finalAlpha);
+            }
+        `;
+
+        // 3. 创建全息地球
+        // =================================================================
+        const geometry = new THREE.SphereGeometry(1, 64, 64);
+
+        const material = new THREE.ShaderMaterial({
+            vertexShader: vertexShader,
+            fragmentShader: fragmentShader,
+            uniforms: {
+                uTime: { value: 0 },
+                uGlowColor: { value: new THREE.Color('#00ffff') }, // 青色辉光
+                uFresnelPower: { value: 2.0 },
+                uScanlineFrequency: { value: 10.0 },
+                uScanlineSpeed: { value: -2.0 }
+            },
+            transparent: true, // 开启透明才能看到菲涅尔效果
+            blending: THREE.AdditiveBlending, // 使用加法混合，让亮部更亮，产生辉光感
+            depthWrite: false, // 透明物体推荐关闭深度写入
+        });
+
+        const hologram = new THREE.Mesh(geometry, material);
+        scene.add(hologram);
+
+        // 4. GUI 调试面板
+        // =================================================================
+        const gui = new GUI();
+        gui.addColor(material.uniforms.uGlowColor, 'value').name('辉光颜色');
+        gui.add(material.uniforms.uFresnelPower, 'value', 0, 5, 0.1).name('菲涅尔强度');
+        gui.add(material.uniforms.uScanlineFrequency, 'value', 1, 30, 0.5).name('扫描线频率');
+        gui.add(material.uniforms.uScanlineSpeed, 'value', -10, 10, 0.1).name('扫描线速度');
+        
+        // 5. 动画循环
+        // =================================================================
+        const clock = new THREE.Clock();
+
+        const animate = () => {
+            const elapsedTime = clock.getElapsedTime();
+            
+            // 更新时间和旋转
+            material.uniforms.uTime.value = elapsedTime;
+            hologram.rotation.y = elapsedTime * 0.1;
+
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        };
+
+        animate();
+
+        // 6. 窗口自适应
+        // =================================================================
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        });
+    </script>
+</body>
+</html>

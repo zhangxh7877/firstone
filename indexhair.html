@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Hair Simulation with Particles</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .canvas-container {
+                height: 80vh;
+                width: 100%;
+                position: relative;
+            }
+            .controls {
+                @apply bg-gray-900/80 text-white p-4 rounded-lg backdrop-blur-sm;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-[clamp(1.5rem,3vw,2.5rem)] font-bold text-gray-800 mb-4">Three.js 毛发渲染示例</h1>
+        <p class="text-gray-600 mb-6 max-w-3xl">基于粒子系统的毛发渲染演示。可以调整参数来改变毛发的外观和行为。</p>
+        
+        <div class="flex flex-col lg:flex-row gap-6">
+            <div class="canvas-container lg:w-2/3 rounded-xl overflow-hidden shadow-xl">
+                <canvas id="hairCanvas"></canvas>
+            </div>
+            
+            <div class="controls lg:w-1/3 space-y-4">
+                <div>
+                    <h2 class="text-lg font-semibold mb-2">毛发参数</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-sm mb-1">密度</label>
+                            <input type="range" id="hairDensity" min="1000" max="10000" step="1000" value="5000" 
+                                class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                            <span id="hairDensityValue" class="text-sm text-gray-300">5000</span>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-1">长度</label>
+                            <input type="range" id="hairLength" min="0.1" max="1.0" step="0.1" value="0.5" 
+                                class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                            <span id="hairLengthValue" class="text-sm text-gray-300">0.5</span>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-1">厚度</label>
+                            <input type="range" id="hairThickness" min="0.001" max="0.01" step="0.001" value="0.005" 
+                                class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                            <span id="hairThicknessValue" class="text-sm text-gray-300">0.005</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h2 class="text-lg font-semibold mb-2">风效果</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-sm mb-1">风力</label>
+                            <input type="range" id="windStrength" min="0" max="0.05" step="0.005" value="0.01" 
+                                class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                            <span id="windStrengthValue" class="text-sm text-gray-300">0.01</span>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-1">风方向</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="text-xs">X</label>
+                                    <input type="range" id="windDirectionX" min="-1" max="1" step="0.1" value="1" 
+                                        class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                                    <span id="windDirectionXValue" class="text-xs text-gray-300">1</span>
+                                </div>
+                                <div>
+                                    <label class="text-xs">Y</label>
+                                    <input type="range" id="windDirectionY" min="-1" max="1" step="0.1" value="0" 
+                                        class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                                    <span id="windDirectionYValue" class="text-xs text-gray-300">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h2 class="text-lg font-semibold mb-2">颜色</h2>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-sm mb-1">毛发颜色</label>
+                            <input type="color" id="hairColor" value="#8B4513" 
+                                class="w-full h-8 rounded border-0 cursor-pointer">
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-1">基底颜色</label>
+                            <input type="color" id="baseColor" value="#FFE4B5" 
+                                class="w-full h-8 rounded border-0 cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+                
+                <button id="resetButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition-all duration-300">
+                    重置参数
+                </button>
+            </div>
+        </div>
+        
+        <div class="mt-8 bg-white p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">关于本示例</h2>
+            <p class="text-gray-600 mb-4">这个示例使用Three.js的粒子系统实现了基本的毛发渲染效果。通过调整右侧面板的参数，您可以：</p>
+            <ul class="list-disc list-inside text-gray-600 space-y-2">
+                <li>改变毛发的密度、长度和厚度</li>
+                <li>调整风力大小和方向，观察毛发随风飘动的效果</li>
+                <li>修改毛发和基底的颜色</li>
+            </ul>
+            <p class="text-gray-600 mt-4">在实际应用中，毛发渲染通常需要更复杂的算法和优化技术来实现更高质量的效果。</p>
+        </div>
+    </div>
+
+    <script>
+        // 初始化Three.js场景
+        const canvas = document.getElementById('hairCanvas');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({
+            canvas: canvas,
+            antialias: true,
+            alpha: true
+        });
+        renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setClearColor(0xf0f0f0, 0);
+
+        // 添加轨道控制器
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // 相机位置
+        camera.position.z = 5;
+
+        // 添加光源
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 5, 5);
+        scene.add(directionalLight);
+
+        // 基础参数
+        let params = {
+            hairDensity: 5000,
+            hairLength: 0.5,
+            hairThickness: 0.005,
+            windStrength: 0.01,
+            windDirection: new THREE.Vector3(1, 0, 0),
+            hairColor: 0x8B4513,
+            baseColor: 0xFFE4B5
+        };
+
+        // 存储原始参数用于重置
+        const defaultParams = {...params};
+
+        // 创建基底几何体
+        let baseGeometry = new THREE.SphereGeometry(1, 32, 32);
+        let baseMaterial = new THREE.MeshStandardMaterial({ color: params.baseColor });
+        let baseMesh = new THREE.Mesh(baseGeometry, baseMaterial);
+        scene.add(baseMesh);
+
+        // 毛发粒子系统相关变量
+        let hairGeometry;
+        let hairMaterial;
+        let hairMesh;
+        let hairPositions;
+        let hairDirections;
+        let hairLengths;
+        let time = 0;
+
+        // 创建毛发
+        function createHair() {
+            // 移除旧的毛发
+            if (hairMesh) {
+                scene.remove(hairMesh);
+                hairGeometry.dispose();
+                hairMaterial.dispose();
+            }
+
+            // 创建新的毛发几何体
+            hairGeometry = new THREE.BufferGeometry();
+            
+            // 为每个顶点创建多根毛发
+            const verticesCount = params.hairDensity;
+            hairPositions = new Float32Array(verticesCount * 3);
+            hairDirections = new Float32Array(verticesCount * 3);
+            hairLengths = new Float32Array(verticesCount);
+            
+            // 生成毛发位置和方向
+            for (let i = 0; i < verticesCount; i++) {
+                // 从球体表面随机选择位置
+                const index = Math.floor(Math.random() * baseGeometry.attributes.position.count);
+                const position = new THREE.Vector3().fromBufferAttribute(baseGeometry.attributes.position, index);
+                
+                // 计算法线方向（毛发基本生长方向）
+                const normal = new THREE.Vector3().fromBufferAttribute(baseGeometry.attributes.normal, index);
+                
+                // 添加一些随机性到毛发方向
+                const randomDir = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2
+                );
+                const hairDir = normal.clone().add(randomDir).normalize();
+                
+                // 设置毛发位置（从球体表面开始）
+                hairPositions[i * 3] = position.x;
+                hairPositions[i * 3 + 1] = position.y;
+                hairPositions[i * 3 + 2] = position.z;
+                
+                // 设置毛发方向
+                hairDirections[i * 3] = hairDir.x;
+                hairDirections[i * 3 + 1] = hairDir.y;
+                hairDirections[i * 3 + 2] = hairDir.z;
+                
+                // 设置毛发长度（有一些随机变化）
+                hairLengths[i] = params.hairLength * (0.8 + Math.random() * 0.4);
+            }
+            
+            // 设置几何体属性
+            hairGeometry.setAttribute('position', new THREE.BufferAttribute(hairPositions, 3));
+            
+            // 创建毛发材质
+            hairMaterial = new THREE.PointsMaterial({
+                color: params.hairColor,
+                size: params.hairThickness,
+                transparent: true,
+                opacity: 0.8,
+                sizeAttenuation: true
+            });
+            
+            // 创建毛发粒子系统
+            hairMesh = new THREE.Points(hairGeometry, hairMaterial);
+            scene.add(hairMesh);
+        }
+
+        // 更新毛发参数
+        function updateHairParams() {
+            if (!hairMesh) return;
+            
+            // 更新材质
+            hairMaterial.color.set(params.hairColor);
+            hairMaterial.size = params.hairThickness;
+            
+            // 更新基底材质
+            baseMaterial.color.set(params.baseColor);
+            
+            // 重新生成毛发位置和方向
+            for (let i = 0; i < params.hairDensity; i++) {
+                // 从球体表面随机选择位置
+                const index = Math.floor(Math.random() * baseGeometry.attributes.position.count);
+                const position = new THREE.Vector3().fromBufferAttribute(baseGeometry.attributes.position, index);
+                
+                // 计算法线方向（毛发基本生长方向）
+                const normal = new THREE.Vector3().fromBufferAttribute(baseGeometry.attributes.normal, index);
+                
+                // 添加一些随机性到毛发方向
+                const randomDir = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2
+                );
+                const hairDir = normal.clone().add(randomDir).normalize();
+                
+                // 设置毛发位置（从球体表面开始）
+                hairPositions[i * 3] = position.x;
+                hairPositions[i * 3 + 1] = position.y;
+                hairPositions[i * 3 + 2] = position.z;
+                
+                // 设置毛发方向
+                hairDirections[i * 3] = hairDir.x;
+                hairDirections[i * 3 + 1] = hairDir.y;
+                hairDirections[i * 3 + 2] = hairDir.z;
+                
+                // 设置毛发长度（有一些随机变化）
+                hairLengths[i] = params.hairLength * (0.8 + Math.random() * 0.4);
+            }
+            
+            // 更新几何体属性
+            hairGeometry.attributes.position.needsUpdate = true;
+        }
+
+        // 动画循环
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            time += 0.01;
+            
+            // 应用风力效果
+            if (hairMesh && hairPositions) {
+                for (let i = 0; i < hairPositions.length; i += 3) {
+                    // 获取毛发方向和长度
+                    const dirX = hairDirections[i];
+                    const dirY = hairDirections[i + 1];
+                    const dirZ = hairDirections[i + 2];
+                    const length = hairLengths[i / 3];
+                    
+                    // 计算风力影响（添加波浪效果）
+                    const windEffectX = params.windDirection.x * params.windStrength * Math.sin(time + i * 0.01);
+                    const windEffectY = params.windDirection.y * params.windStrength * Math.sin(time + i * 0.01 + 1);
+                    
+                    // 更新毛发位置（模拟风吹动）
+                    hairPositions[i] += windEffectX;
+                    hairPositions[i + 1] += windEffectY;
+                    
+                    // 限制毛发不要超出最大长度
+                    const baseX = hairPositions[i] - dirX * length;
+                    const baseY = hairPositions[i + 1] - dirY * length;
+                    const baseZ = hairPositions[i + 2] - dirZ * length;
+                    
+                    const dx = hairPositions[i] - baseX;
+                    const dy = hairPositions[i + 1] - baseY;
+                    const dz = hairPositions[i + 2] - baseZ;
+                    const currentLength = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    
+                    if (currentLength > length) {
+                        const scale = length / currentLength;
+                        hairPositions[i] = baseX + dx * scale;
+                        hairPositions[i + 1] = baseY + dy * scale;
+                        hairPositions[i + 2] = baseZ + dz * scale;
+                    }
+                }
+                
+                // 标记位置属性需要更新
+                hairGeometry.attributes.position.needsUpdate = true;
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // 响应式处理
+        window.addEventListener('resize', () => {
+            const newWidth = canvas.clientWidth;
+            const newHeight = canvas.clientHeight;
+            
+            camera.aspect = newWidth / newHeight;
+            camera.updateProjectionMatrix();
+            
+            renderer.setSize(newWidth, newHeight);
+        });
+
+        // 初始化控制器
+        function initControls() {
+            // 毛发密度控制
+            const hairDensitySlider = document.getElementById('hairDensity');
+            const hairDensityValue = document.getElementById('hairDensityValue');
+            
+            hairDensitySlider.addEventListener('input', (e) => {
+                params.hairDensity = parseInt(e.target.value);
+                hairDensityValue.textContent = params.hairDensity;
+                createHair();
+            });
+            
+            // 毛发长度控制
+            const hairLengthSlider = document.getElementById('hairLength');
+            const hairLengthValue = document.getElementById('hairLengthValue');
+            
+            hairLengthSlider.addEventListener('input', (e) => {
+                params.hairLength = parseFloat(e.target.value);
+                hairLengthValue.textContent = params.hairLength.toFixed(1);
+                updateHairParams();
+            });
+            
+            // 毛发厚度控制
+            const hairThicknessSlider = document.getElementById('hairThickness');
+            const hairThicknessValue = document.getElementById('hairThicknessValue');
+            
+            hairThicknessSlider.addEventListener('input', (e) => {
+                params.hairThickness = parseFloat(e.target.value);
+                hairThicknessValue.textContent = params.hairThickness.toFixed(3);
+                hairMaterial.size = params.hairThickness;
+            });
+            
+            // 风力控制
+            const windStrengthSlider = document.getElementById('windStrength');
+            const windStrengthValue = document.getElementById('windStrengthValue');
+            
+            windStrengthSlider.addEventListener('input', (e) => {
+                params.windStrength = parseFloat(e.target.value);
+                windStrengthValue.textContent = params.windStrength.toFixed(2);
+            });
+            
+            // 风方向X控制
+            const windDirectionXSlider = document.getElementById('windDirectionX');
+            const windDirectionXValue = document.getElementById('windDirectionXValue');
+            
+            windDirectionXSlider.addEventListener('input', (e) => {
+                params.windDirection.x = parseFloat(e.target.value);
+                windDirectionXValue.textContent = params.windDirection.x.toFixed(1);
+            });
+            
+            // 风方向Y控制
+            const windDirectionYSlider = document.getElementById('windDirectionY');
+            const windDirectionYValue = document.getElementById('windDirectionYValue');
+            
+            windDirectionYSlider.addEventListener('input', (e) => {
+                params.windDirection.y = parseFloat(e.target.value);
+                windDirectionYValue.textContent = params.windDirection.y.toFixed(1);
+            });
+            
+            // 毛发颜色控制
+            const hairColorInput = document.getElementById('hairColor');
+            
+            hairColorInput.addEventListener('input', (e) => {
+                params.hairColor = parseInt(e.target.value.replace('#', '0x'));
+                hairMaterial.color.set(params.hairColor);
+            });
+            
+            // 基底颜色控制
+            const baseColorInput = document.getElementById('baseColor');
+            
+            baseColorInput.addEventListener('input', (e) => {
+                params.baseColor = parseInt(e.target.value.replace('#', '0x'));
+                baseMaterial.color.set(params.baseColor);
+            });
+            
+            // 重置按钮
+            const resetButton = document.getElementById('resetButton');
+            
+            resetButton.addEventListener('click', () => {
+                // 恢复默认参数
+                params = {...defaultParams};
+                
+                // 更新UI
+                hairDensitySlider.value = params.hairDensity;
+                hairDensityValue.textContent = params.hairDensity;
+                
+                hairLengthSlider.value = params.hairLength;
+                hairLengthValue.textContent = params.hairLength.toFixed(1);
+                
+                hairThicknessSlider.value = params.hairThickness;
+                hairThicknessValue.textContent = params.hairThickness.toFixed(3);
+                
+                windStrengthSlider.value = params.windStrength;
+                windStrengthValue.textContent = params.windStrength.toFixed(2);
+                
+                windDirectionXSlider.value = params.windDirection.x;
+                windDirectionXValue.textContent = params.windDirection.x.toFixed(1);
+                
+                windDirectionYSlider.value = params.windDirection.y;
+                windDirectionYValue.textContent = params.windDirection.y.toFixed(1);
+                
+                hairColorInput.value = '#' + params.hairColor.toString(16).padStart(6, '0');
+                baseColorInput.value = '#' + params.baseColor.toString(16).padStart(6, '0');
+                
+                // 重新创建毛发
+                createHair();
+            });
+        }
+
+        // 初始化场景
+        function init() {
+            createHair();
+            initControls();
+            animate();
+        }
+
+        // 启动应用
+        init();
+    </script>
+</body>
+</html>    

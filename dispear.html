@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js 着色器案例 - 物体溶解特效</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: #fff; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/",
+                "lil-gui": "https://unpkg.com/lil-gui@0.19.1/dist/lil-gui.esm.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import GUI from 'lil-gui';
+
+        // 1. 场景基础设置
+        // =================================================================
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 0, 3);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // 2. GLSL 着色器代码
+        // =================================================================
+        
+        // --- 顶点着色器 ---
+        // 本案例的核心在片元着色器，顶点着色器只需传递UV坐标
+        const vertexShader = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        // --- 片元着色器 ---
+        // 这里是所有魔法发生的地方
+        const fragmentShader = `
+            uniform float uProgress;    // 溶解进度 (0.0 to 1.0)
+            uniform sampler2D uNoise;   // 用于控制溶解形状的噪声贴图
+            uniform vec3 uGlowColor;    // 溶解边缘的辉光颜色
+
+            varying vec2 vUv;
+
+            void main() {
+                // 1. 从噪声贴图中采样
+                // vUv是顶点对应的纹理坐标，我们用它来读取噪声图上对应位置的像素值
+                float noiseValue = texture2D(uNoise, vUv).r; // 只取红色通道值即可
+
+                // 2. 核心溶解逻辑
+                // 如果噪声值小于当前的溶解进度，就丢弃这个片元（使其完全透明）
+                if (noiseValue < uProgress) {
+                    discard;
+                }
+                
+                // 3. 边缘辉光逻辑
+                // smoothstep函数可以创建一个平滑的过渡带
+                // 当 noiseValue 非常接近 uProgress 时，glow будет接近 1.0
+                float glow = smoothstep(uProgress, uProgress + 0.05, noiseValue);
+
+                // 最终颜色 = 基础颜色(白色) + 辉光颜色
+                // (1.0 - glow) 使得辉光只在边缘出现，形成一条亮线
+                vec3 finalColor = vec3(1.0) + uGlowColor * (1.0 - glow);
+
+                gl_FragColor = vec4(finalColor, 1.0);
+            }
+        `;
+        
+        // 3. 创建特效物体
+        // =================================================================
+
+        // 程序化生成一张随机噪声贴图
+        const noiseTexture = new THREE.DataTexture(
+            new Uint8Array(256 * 256).map(() => Math.floor(Math.random() * 256)),
+            256,
+            256,
+            THREE.RedFormat, // 只使用红色通道存储噪声值
+            THREE.UnsignedByteType
+        );
+        noiseTexture.needsUpdate = true;
+
+        // 使用一个复杂的几何体来更好地展示效果
+        const geometry = new THREE.TorusKnotGeometry(1, 0.3, 200, 32);
+
+        // 创建自定义着色器材质
+        const material = new THREE.ShaderMaterial({
+            vertexShader: vertexShader,
+            fragmentShader: fragmentShader,
+            uniforms: {
+                uProgress: { value: 0.0 },
+                uNoise: { value: noiseTexture },
+                uGlowColor: { value: new THREE.Color('#ff3300') },
+            }
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+
+        // 4. GUI 调试面板
+        // =================================================================
+        const gui = new GUI();
+        gui.add(material.uniforms.uProgress, 'value', 0, 1, 0.01).name('溶解进度').listen();
+        gui.addColor(material.uniforms.uGlowColor, 'value').name('辉光颜色');
+        
+        const animationParams = {
+            play: () => {
+                // 使用一个简单的动画库（或手动实现）来驱动进度
+                let progress = { value: 0 };
+                function animateProgress() {
+                    requestAnimationFrame(animateProgress);
+                    material.uniforms.uProgress.value = progress.value;
+                }
+                animateProgress();
+                
+                // 模拟动画过程
+                progress.value = 0;
+                let target = { value: 1 };
+                let anim = () => {
+                   progress.value += (target.value - progress.value) * 0.05;
+                   if(Math.abs(target.value - progress.value) < 0.001 && target.value === 1) {
+                       target.value = 0;
+                       setTimeout(anim, 1000);
+                   } else if(Math.abs(target.value - progress.value) < 0.001 && target.value === 0) {
+                        target.value = 1;
+                        setTimeout(anim, 1000);
+                   }
+                   else {
+                       requestAnimationFrame(anim);
+                   }
+                };
+                anim();
+            }
+        };
+        gui.add(animationParams, 'play').name('播放/暂停动画');
+
+
+        // 5. 动画循环
+        // =================================================================
+        const clock = new THREE.Clock();
+
+        const animate = () => {
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        };
+
+        animate();
+
+        // 6. 窗口自适应
+        // =================================================================
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

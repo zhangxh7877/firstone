@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js 着色器案例 - 程序化数字海洋</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/",
+                "lil-gui": "https://unpkg.com/lil-gui@0.19.1/dist/lil-gui.esm.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import GUI from 'lil-gui';
+
+        // 1. 场景基础设置
+        // =================================================================
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(2, 2, 4);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // 2. GLSL 着色器代码
+        // =================================================================
+        
+        // --- 顶点着色器 ---
+        // 负责计算并修改每个顶点的位置
+        const vertexShader = `
+            // Uniforms: 从JavaScript传入的、对所有顶点都相同的数据
+            uniform float uTime;
+            
+            uniform float uBigWavesElevation;
+            uniform vec2 uBigWavesFrequency;
+            uniform float uBigWavesSpeed;
+            
+            uniform float uSmallWavesElevation;
+            uniform float uSmallWavesFrequency;
+            uniform float uSmallWavesSpeed;
+            uniform float uSmallWavesIterations;
+
+            // Varyings: 从顶点着色器传递到片元着色器的数据
+            varying float vElevation;
+
+            // 经典噪声函数 (由 Ashima Arts 和 Stefan Gustavson 贡献)
+            // 我们无需自己实现，直接使用即可
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+            vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+            float snoise(vec3 v) {
+                const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+                const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+                vec3 i = floor(v + dot(v, C.yyy));
+                vec3 x0 = v - i + dot(i, C.xxx);
+                vec3 g = step(x0.yzx, x0.xyz);
+                vec3 l = 1.0 - g;
+                vec3 i1 = min(g.xyz, l.zxy);
+                vec3 i2 = max(g.xyz, l.zxy);
+                vec3 x1 = x0 - i1 + C.xxx;
+                vec3 x2 = x0 - i2 + C.yyy;
+                vec3 x3 = x0 - D.yyy;
+                i = mod289(i);
+                vec4 p = permute(permute(permute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+                float n_ = 0.142857142857;
+                vec3 ns = n_ * D.wyz - D.xzx;
+                vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+                vec4 x_ = floor(j * ns.z);
+                vec4 y_ = floor(j - 7.0 * x_);
+                vec4 x = x_ * ns.x + ns.yyyy;
+                vec4 y = y_ * ns.x + ns.yyyy;
+                vec4 h = 1.0 - abs(x) - abs(y);
+                vec4 b0 = vec4(x.xy, y.xy);
+                vec4 b1 = vec4(x.zw, y.zw);
+                vec4 s0 = floor(b0)*2.0 + 1.0;
+                vec4 s1 = floor(b1)*2.0 + 1.0;
+                vec4 sh = -step(h, vec4(0.0));
+                vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+                vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+                vec3 p0 = vec3(a0.xy,h.x);
+                vec3 p1 = vec3(a0.zw,h.y);
+                vec3 p2 = vec3(a1.xy,h.z);
+                vec3 p3 = vec3(a1.zw,h.w);
+                vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+                p0 *= norm.x;
+                p1 *= norm.y;
+                p2 *= norm.z;
+                p3 *= norm.w;
+                vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+                m = m * m;
+                return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+            }
+
+            void main() {
+                // position 是Three.js传入的顶点原始坐标 (attribute)
+                vec4 modelPosition = vec4(position, 1.0);
+
+                // --- 核心：通过叠加噪声来计算波浪高度 ---
+                // 1. 大波浪: 使用低频率噪声，创造整体的、缓慢的起伏
+                float bigWave = snoise(vec3(
+                    modelPosition.x * uBigWavesFrequency.x + uTime * uBigWavesSpeed,
+                    modelPosition.z * uBigWavesFrequency.y + uTime * uBigWavesSpeed,
+                    uTime
+                ));
+
+                // 2. 小涟漪: 叠加多层高频噪声，模拟水面细节
+                float smallWave = 0.0;
+                for(float i = 1.0; i <= uSmallWavesIterations; i++){
+                    smallWave += snoise(vec3(
+                        modelPosition.x * uSmallWavesFrequency * i,
+                        modelPosition.z * uSmallWavesFrequency * i,
+                        uTime * uSmallWavesSpeed * i
+                    )) / i;
+                }
+
+                // 3. 组合两种波浪，计算最终的高度
+                float elevation = bigWave * uBigWavesElevation + smallWave * uSmallWavesElevation;
+                modelPosition.y += elevation;
+
+                // 4. 将高度存入varying变量，供片元着色器使用
+                vElevation = elevation;
+
+                // gl_Position 是内建的最终输出变量，必须被赋值
+                gl_Position = projectionMatrix * modelViewMatrix * modelPosition;
+            }
+        `;
+
+        // --- 片元着色器 ---
+        // 负责计算每个像素(片元)的颜色
+        const fragmentShader = `
+            uniform vec3 uDeepColor;
+            uniform vec3 uSurfaceColor;
+            uniform float uColorOffset;
+            uniform float uColorMultiplier;
+
+            varying float vElevation; // 从顶点着色器接收的高度值
+
+            void main() {
+                // 将 vElevation 值映射到 0.0 到 1.0 的范围，用于颜色混合
+                float mixStrength = (vElevation + uColorOffset) * uColorMultiplier;
+
+                // mix()函数根据mixStrength在两种颜色之间进行线性插值
+                vec3 color = mix(uDeepColor, uSurfaceColor, mixStrength);
+            
+                // gl_FragColor 是内建的最终输出变量，代表当前像素的颜色
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        // 3. 创建材质和网格
+        // =================================================================
+
+        // 创建一个高度分段和宽度分段都很高的平面，这样才有足够的顶点来形成平滑的波纹
+        const waterGeometry = new THREE.PlaneGeometry(10, 10, 512, 512);
+
+        // 创建自定义着色器材质
+        const waterMaterial = new THREE.ShaderMaterial({
+            vertexShader: vertexShader,
+            fragmentShader: fragmentShader,
+            // 在这里定义所有uniforms，并设置初始值
+            uniforms: {
+                uTime: { value: 0 },
+                
+                uBigWavesElevation: { value: 0.2 },
+                uBigWavesFrequency: { value: new THREE.Vector2(4, 1.5) },
+                uBigWavesSpeed: { value: 0.75 },
+                
+                uSmallWavesElevation: { value: 0.15 },
+                uSmallWavesFrequency: { value: 3.0 },
+                uSmallWavesSpeed: { value: 0.2 },
+                uSmallWavesIterations: { value: 4.0 },
+
+                uDeepColor: { value: new THREE.Color('#1e00ff') },
+                uSurfaceColor: { value: new THREE.Color('#66ccff') },
+                uColorOffset: { value: 0.08 },
+                uColorMultiplier: { value: 5.0 }
+            }
+        });
+
+        const water = new THREE.Mesh(waterGeometry, waterMaterial);
+        water.rotation.x = -Math.PI / 2; // 将平面放平
+        scene.add(water);
+
+        // 4. GUI 调试面板
+        // =================================================================
+        const gui = new GUI({ width: 340 });
+        const bigWavesFolder = gui.addFolder('大波浪 (Big Waves)');
+        bigWavesFolder.add(waterMaterial.uniforms.uBigWavesElevation, 'value', 0, 1, 0.01).name('高度');
+        bigWavesFolder.add(waterMaterial.uniforms.uBigWavesFrequency.value, 'x', 0, 10, 0.1).name('X轴频率');
+        bigWavesFolder.add(waterMaterial.uniforms.uBigWavesFrequency.value, 'y', 0, 10, 0.1).name('Z轴频率');
+        bigWavesFolder.add(waterMaterial.uniforms.uBigWavesSpeed, 'value', 0, 4, 0.01).name('速度');
+        
+        const smallWavesFolder = gui.addFolder('小涟漪 (Small Waves)');
+        smallWavesFolder.add(waterMaterial.uniforms.uSmallWavesElevation, 'value', 0, 1, 0.01).name('高度');
+        smallWavesFolder.add(waterMaterial.uniforms.uSmallWavesFrequency, 'value', 0, 30, 0.1).name('频率');
+        smallWavesFolder.add(waterMaterial.uniforms.uSmallWavesSpeed, 'value', 0, 4, 0.01).name('速度');
+        smallWavesFolder.add(waterMaterial.uniforms.uSmallWavesIterations, 'value', 0, 8, 1).name('叠加次数');
+
+        const colorFolder = gui.addFolder('颜色 (Colors)');
+        colorFolder.addColor(waterMaterial.uniforms.uDeepColor, 'value').name('深色');
+        colorFolder.addColor(waterMaterial.uniforms.uSurfaceColor, 'value').name('表面色');
+        colorFolder.add(waterMaterial.uniforms.uColorOffset, 'value', 0, 1, 0.01).name('颜色偏移');
+        colorFolder.add(waterMaterial.uniforms.uColorMultiplier, 'value', 0, 10, 0.1).name('颜色增益');
+
+
+        // 5. 动画循环
+        // =================================================================
+        const clock = new THREE.Clock();
+
+        const animate = () => {
+            const elapsedTime = clock.getElapsedTime();
+            
+            // 在每一帧，更新uniform的uTime值，驱动着色器动画
+            waterMaterial.uniforms.uTime.value = elapsedTime;
+
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        };
+
+        animate();
+
+        // 6. 窗口自适应
+        // =================================================================
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        });
+    </script>
+</body>
+</html>
